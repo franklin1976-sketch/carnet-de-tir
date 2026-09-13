@@ -393,7 +393,8 @@ function render(){
   ${ui.menu?`<div class="menu">
     <button data-a="expJson">Exporter en JSON</button>
     <button data-a="expCsv">Exporter les tirs en CSV</button>
-    <button data-a="imp">Importer une sauvegarde</button></div>`:""}
+    <button data-a="imp">Importer une sauvegarde</button>
+    <button data-a="backup">Sauvegarde par copier-coller</button></div>`:""}
   <main>${body()}</main>
   ${ui.route?"":`<nav>${[["tirs","Tirs"],["recettes","Munitions"],["base","Base"],["armes","Armes"]]
     .map(([k,l])=>`<button class="${ui.tab===k?"on":""}" data-a="tab" data-v="${k}">${l}</button>`).join("")}</nav>`}`;
@@ -404,6 +405,7 @@ function body(){
     if(ui.route.t==="tir")return ficheTir();
     if(ui.route.t==="recette")return ficheRecette();
     if(ui.route.t==="arme")return ficheArme();
+    if(ui.route.t==="backup")return ecranBackup();
   }
   return{tirs:ecranTirs,recettes:ecranRecettes,base:ecranBase,armes:ecranArmes}[ui.tab]();
 }
@@ -707,6 +709,22 @@ document.addEventListener("click",e=>{
 
   switch(a){
     case "menu":ui.menu=!ui.menu;break;
+    case "backup":ui.menu=false;ui.route={t:"backup",texte:JSON.stringify(db,null,1),nom:"carnet"};break;
+    case "copier":{const t=document.getElementById("bk");
+      if(t){t.select();t.setSelectionRange(0,999999);
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          navigator.clipboard.writeText(t.value).then(()=>alert("Sauvegarde copiee."),()=>{
+            try{document.execCommand("copy");alert("Sauvegarde copiee.")}catch(e){alert("Copie impossible : selectionne le texte a la main.")}});
+        } else {
+          try{document.execCommand("copy");alert("Sauvegarde copiee.")}catch(e){alert("Copie impossible : selectionne le texte a la main.")}
+        }}
+      return}
+    case "restaurer":{const t=document.getElementById("rs");
+      if(!t||!t.value.trim()){alert("Colle d'abord une sauvegarde dans le second cadre.");return}
+      try{const d=JSON.parse(t.value);db={...EMPTY,...d,perso:{...EMPTY.perso,...(d.perso||{})}};save();
+        ui.route=null;alert("Carnet restaure.")}
+      catch(e){alert("Texte illisible : ce n'est pas une sauvegarde valide.");return}
+      break}
     case "tab":ui.tab=v;ui.menu=false;break;
     case "close":ui.route=null;draft=null;break;
     case "baseCat":ui.baseCat=v;ui.baseQ="";break;
@@ -773,10 +791,47 @@ document.addEventListener("click",e=>{
 });
 
 const today=()=>new Date().toISOString().slice(0,10);
-function dl(txt,name,mime){
-  const b=new Blob([txt],{type:mime}),u=URL.createObjectURL(b),a=document.createElement("a");
-  a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);
+async function dl(txt,name,mime){
+  // 1) Dans l'APK : ecriture reelle dans Documents via Capacitor, puis partage
+  const cap=window.Capacitor&&window.Capacitor.Plugins;
+  if(cap&&cap.Filesystem){
+    try{
+      const r=await cap.Filesystem.writeFile({path:name,data:txt,directory:"DOCUMENTS",encoding:"utf8",recursive:true});
+      if(cap.Share){
+        try{await cap.Share.share({title:name,text:"Sauvegarde du carnet de tir",url:r.uri,dialogTitle:"Envoyer la sauvegarde"});return}
+        catch(e){}
+      }
+      alert("Fichier enregistre dans Documents :\n"+name);
+      return;
+    }catch(e){ /* on tente la suite */ }
+  }
+  // 2) Navigateur : telechargement classique
+  try{
+    const b=new Blob([txt],{type:mime}),u=URL.createObjectURL(b),a=document.createElement("a");
+    a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),2000);
+    return;
+  }catch(e){}
+  // 3) Dernier recours : affichage pour copier-coller
+  ui.route={t:"backup",texte:txt,nom:name};render();
 }
+
+function ecranBackup(){
+  return `<div style="display:flex;justify-content:space-between;margin-bottom:14px">
+    <button class="btn s" data-a="close">Retour</button>
+    <button class="btn s p" data-a="copier">Copier</button></div>
+  ${rule("Sauvegarde par copier-coller")}
+  <div style="font-size:12.5px;color:var(--mute);line-height:1.6;margin-bottom:10px">
+    Copie ce texte et colle-le dans un mail, une note ou un fichier. C'est ta sauvegarde complete :
+    tirs, munitions, armes et references ajoutees.</div>
+  <textarea id="bk" rows="10" style="font-family:var(--mono);font-size:11px">${esc(ui.route.texte||JSON.stringify(db))}</textarea>
+  ${rule("Restaurer")}
+  <div style="font-size:12.5px;color:var(--mute);line-height:1.6;margin-bottom:10px">
+    Colle ici une sauvegarde precedente, puis valide. Le carnet actuel sera remplace.</div>
+  <textarea id="rs" rows="6" placeholder="Colle ici le contenu d'une sauvegarde" style="font-family:var(--mono);font-size:11px"></textarea>
+  <div class="foot"><button class="btn d full" data-a="restaurer">Remplacer le carnet par ce texte</button></div>`;
+}
+
 if("serviceWorker" in navigator&&location.protocol.startsWith("http"))
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 render();
