@@ -1,0 +1,12 @@
+{
+  "name": "Carnet de tir",
+  "short_name": "Carnet",
+  "start_url": "index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E1417",
+  "theme_color": "#0E1417",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
