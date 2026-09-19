@@ -25,31 +25,47 @@ jobs:
           echo "--- www ---"; ls -la www || echo "DOSSIER www ABSENT"
           echo "--- resources ---"; ls -la resources || echo "pas de dossier resources"
 
-      - name: Ranger les fichiers au bon endroit
+      - name: Choisir la bonne version des fichiers
         shell: bash
         run: |
           set +e
           mkdir -p www resources
-          # un .html depose a la racine ECRASE toujours www/index.html
-          racine=$(ls -1 *.html 2>/dev/null | head -1)
-          if [ -n "$racine" ]; then
-            cp -f "$racine" www/index.html
-            echo "racine : $racine -> www/index.html (ecrasement)"
-          fi
-          # sinon, un .html au nom different dans www/ devient index.html
-          if [ ! -f www/index.html ]; then
-            autre=$(ls -1 www/*.html 2>/dev/null | head -1)
-            [ -n "$autre" ] && mv -f "$autre" www/index.html && echo "$autre -> www/index.html"
-          fi
-          if [ ! -f www/index.html ]; then
+          shopt -s nullglob
+
+          # --- HTML : on garde celui qui porte le numero de version le plus eleve ---
+          best=""; bestv=""
+          for f in *.html www/*.html; do
+            [ -f "$f" ] || continue
+            v=$(grep -o 'const VERSION="[^"]*"' "$f" | head -1 | sed 's/.*="//; s/"$//')
+            echo "candidat : $f    version : ${v:-aucune}    $(wc -c < "$f") octets"
+            if [ -n "$v" ]; then
+              if [ -z "$bestv" ] || [[ "$v" > "$bestv" ]]; then best="$f"; bestv="$v"; fi
+            elif [ -z "$best" ]; then best="$f"; fi
+          done
+          if [ -z "$best" ]; then
             echo "ERREUR : aucun fichier .html dans le depot."
             find . -maxdepth 3 -not -path './.git/*'
             exit 1
           fi
-          for x in icon.svg manifest.json sw.js; do
-            [ -f "$x" ] && cp -f "$x" www/ && echo "$x -> www/ (ecrasement)"
+          echo ">>> retenu : $best (version ${bestv:-aucune})"
+          tmp=$(mktemp); cp -f "$best" "$tmp"
+          rm -f www/*.html
+          cp -f "$tmp" www/index.html
+
+          # --- annexes : on accepte les noms dupliques type "sw (1).js" ---
+          for motif in "sw*.js" "manifest*.json" "icon*.svg"; do
+            for f in $motif www/$motif; do
+              [ -f "$f" ] || continue
+              cible=$(basename "$f" | sed 's/ *(\([0-9]\+\))//')
+              cp -f "$f" "www/$cible"; echo "$f -> www/$cible"
+            done
           done
-          if [ -f icon.png ]; then cp -f icon.png resources/icon.png; echo "icon.png -> resources/"; fi
+          for f in icon*.png resources/icon*.png; do
+            [ -f "$f" ] || continue
+            cp -f "$f" resources/icon.png; echo "$f -> resources/icon.png"
+          done
+          rm -f www/sw\ *.js www/icon\ *.svg www/manifest\ *.json 2>/dev/null
+
           echo "--- www ---"; ls -la www
           echo "--- resources ---"; ls -la resources
           exit 0
